@@ -3,6 +3,7 @@ package node1
 type info struct {
 }
 
+// testFuncRoAssign 判断 *ast.AssignStmt 的tok，来区分是赋值token.ASSIGN，还是初始化token.DEFINE
 func testFuncRoAssign() {
 	var roInt = 1
 	_ = roInt
@@ -16,10 +17,14 @@ func testFuncRoAssign() {
 	_ = roInt3
 }
 
+// testFuncRoDeclare 判断 *ast.DeclStmt 声明，是否符合规范 GenDecl
 func testFuncRoDeclare() {
-	var roInt = 1
-	_ = roInt
+	var roInfo = info{}
+	_ = roInfo
 
-	var roInt2 = roInt // 合法，用别的只读变量初始化
-	_ = roInt2
+	var roInfo2 = roInfo // 合法，用别的只读变量初始化
+	_ = roInfo2
+
+	var i = roInfo // 非法，只读变量不能初始化到普通变量上
+	_ = i
 }
