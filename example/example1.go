@@ -74,4 +74,5 @@ func funcRoRule() {
 func main() {
 	basicTypeRoRule()
 	funcRoRule()
+	baseAssign()
 }

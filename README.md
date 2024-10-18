@@ -1,8 +1,9 @@
 # go-readonly
+类型没有只读的概念，只有变量有只读属性，但是go语言没有只读类型，所以需要通过变量名来标识只读变量
 指定变量为只读模式，不能被修改。通过配套的检查工具检查是否被修改
 
 # 需要关注的节点类型
-stmt、decl、expr三类节点中，根据stmt做检查，decl提供只读信息
+stmt、decl、expr三类节点中，根据stmt做检查，decl提供类型信息
 - stmt 节点  
   需要关注 SendStmt、IncDecStmt、AssignStmt、ExprStmt
 - expr 节点  
