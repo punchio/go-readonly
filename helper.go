@@ -146,7 +146,7 @@ func getExprFuncType(expr ast.Expr, info *types.Info) *ast.FuncType {
 	}
 }
 
-func getSelectorValueExpr(expr *ast.SelectorExpr, structInfo map[*ast.StructType]*structInfo) ast.Decl {
+func getSelectorFuncType(expr *ast.SelectorExpr, structInfo map[*ast.StructType]*structInfo) *ast.FuncType {
 	var fieldNameStack []string
 	var cur ast.Expr = expr
 	var ident *ast.Ident
@@ -193,16 +193,17 @@ func getSelectorValueExpr(expr *ast.SelectorExpr, structInfo map[*ast.StructType
 			return nil
 		}
 	}
-	switch obj.Kind {
-	case ast.Typ:
-		ts, ok := obj.Decl.(*ast.TypeSpec)
-		if !ok {
-			return nil
-		}
-	case ast.Fun:
-	default:
+
+	if obj.Kind != ast.Fun {
 		return nil
 	}
+
+	d, ok := obj.Decl.(*ast.FuncDecl)
+	if !ok {
+		return nil
+	}
+
+	return d.Type
 }
 
 func checkValueSpec(vs *ast.ValueSpec, fset *token.FileSet, info *types.Info) error {

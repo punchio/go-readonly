@@ -10,6 +10,8 @@ func TestValueSpec(t *testing.T) {
 	src := `
 package main
 
+func (st) get() int { return 0 }
+
 type st struct {
 	t st2
 }
@@ -18,7 +20,6 @@ type st2 struct {
 	v int
 }
 
-func (st) get() int { return 0 }
 
 func (st) getSt() st2 { return st2{} }
 
