@@ -4,13 +4,27 @@ type foo struct {
 	items []int
 }
 
+type bar struct {
+}
+
+func (bar) noop() {
+	b := bar{}
+	b.noop()
+}
+
 func newFoo() *foo {
 	return &foo{}
 }
 
-func (f *foo) m1() {
+func (f *foo) m1(b bar, sb *bar) {
 	f.m2()
 	f.m3()
+	b.noop()
+	sb.noop()
+	i := bar{}
+	i.noop()
+	ip := &bar{}
+	ip.noop()
 }
 
 func (f *foo) m2() {
@@ -47,7 +61,7 @@ func (f *foo) get2() ([]int, int) {
 }
 
 func callF1(f *foo) {
-	f.m1()
+	f.m1(bar{}, &bar{})
 }
 
 func callF2(f *foo) {

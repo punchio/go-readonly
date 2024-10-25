@@ -1,5 +1,11 @@
 package testdata
 
+type m1 struct {
+	m m2
+}
+
+var m m1
+
 func callBefore() m3 {
 	m := m1{}
 	return m.declAfter().m
@@ -7,10 +13,6 @@ func callBefore() m3 {
 
 func newM1() *m1 {
 	return &m1{}
-}
-
-type m1 struct {
-	m m2
 }
 
 func (m *m1) declAfter() *m2 {
@@ -22,7 +24,8 @@ func (m *m1) declAfter2() *m2 {
 }
 
 func (m *m2) declBefore() m3 {
-	return m.m
+	roM := m.m
+	return roM
 }
 
 type m2 struct {
@@ -37,10 +40,17 @@ type m3 struct {
 	m int
 }
 
+func (m3) noReceiver() {
+
+}
+
 func (m m3) noop() {
 
 }
 
+func (m3) getM2() m2 {
+	return m2{}
+}
 func callAfter() m3 {
 	m := m1{}
 	return m.m.declBefore()
@@ -56,7 +66,15 @@ func call() {
 	// call-call-call
 	before = newM1().declAfter().declBefore()
 	// call-sel-call
-	before = newM1().m.declBefore()
+	newM1().m.declBefore().getM2().m.getM2()
+
+	roMm := newM1()
+	roMm.declAfter2()
+	roMm = newM1()
+
+	var m2m m2
+	m2m = newM1().m.declBefore().getM2().m.getM2()
+	m2m.declBefore()
 
 	before.noop()
 }

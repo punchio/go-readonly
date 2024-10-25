@@ -1,77 +1,104 @@
 package parser
 
-import (
-	"go/ast"
-	"strings"
-)
-
-var funcInfos = make(map[*ast.FuncDecl]*funcInfo)
-
-type funcInfo struct {
-	roMask int64 // bit: 0,1,...31 param ro;32,...63 result ro
-	decl   *ast.FuncDecl
-	caller []*ast.FuncDecl
-	callee []*ast.FuncDecl
-}
-
-func (i *funcInfo) calcMask() {
-	funcType := i.decl.Type
-	if funcType.Params != nil {
-		index := 0
-		for _, field := range funcType.Params.List {
-			for _, name := range field.Names {
-				if strings.Contains(name.Name, "ro") {
-					i.roMask |= 1 << index
-				}
-				index++
-			}
-		}
-	}
-	if funcType.Results != nil {
-		index := 32
-		for _, field := range funcType.Results.List {
-			for _, name := range field.Names {
-				if strings.Contains(name.Name, "ro") {
-					i.roMask |= 1 << index
-				}
-				index++
-			}
-		}
-	}
-}
-
-func addCallee(caller, callee *ast.FuncDecl) {
-	info, ok := funcInfos[caller]
-	if !ok {
-		info = &funcInfo{
-			roMask: 0,
-			decl:   caller,
-		}
-		info.calcMask()
-		funcInfos[caller] = info
-	}
-	info.callee = append(info.callee, callee)
-}
-
-// CollectFuncDecl 获取结构体方法
-func CollectFuncDecl(node ast.Node) {
-	switch d := node.(type) {
-	case *ast.FuncDecl:
-		ast.Inspect(d.Body, func(node ast.Node) bool {
-			expr, ok := node.(*ast.CallExpr)
-			if !ok {
-				return true
-			}
-			ident, ok := expr.Fun.(*ast.Ident)
-			if !ok {
-				return true
-			}
-			f, ok := ident.Obj.Decl.(*ast.FuncDecl)
-			if !ok {
-				return true
-			}
-			addCallee(d, f)
-			return true
-		})
-	}
-}
+//
+//import (
+//	"go/ast"
+//	"log"
+//	"slices"
+//)
+//
+//// CollectFuncDecl 获取结构体方法
+//func CollectFuncDecl(node ast.Node) {
+//	switch d := node.(type) {
+//	case *ast.FuncDecl:
+//		log.Println("func decl:", d.Name.Name)
+//		ast.Inspect(d.Body, func(node ast.Node) bool {
+//			expr, ok := node.(*ast.CallExpr)
+//			if !ok {
+//				return true
+//			}
+//
+//			var sels []string
+//			cur := expr.Fun
+//			var root *ast.Ident
+//		LOOP:
+//			for {
+//				switch e := cur.(type) {
+//				case *ast.CallExpr:
+//					cur = e.Fun
+//				case *ast.SelectorExpr:
+//					cur = e.X
+//					sels = append(sels, e.Sel.Name)
+//				case *ast.Ident:
+//					root = e
+//					break LOOP
+//				default:
+//					panic("unsupported call expr")
+//				}
+//			}
+//			slices.Reverse(sels)
+//
+//			for i := 0; i < len(sels)-1; i++ {
+//				switch e := root.Obj.Decl.(type) {
+//				case *ast.FuncDecl:
+//					addCallee(d, e)
+//					//ident := getStarIdent(e.Type.Results.List[0].Type)
+//					//st := ident.Obj.Decl.(*ast.StructType)
+//				case *ast.StructType:
+//
+//				}
+//			}
+//			switch e := root.Obj.Decl.(type) {
+//			case *ast.FuncDecl:
+//				addCallee(d, e)
+//			}
+//
+//			switch e := expr.Fun.(type) {
+//			case *ast.Ident:
+//				f, ok := e.Obj.Decl.(*ast.FuncDecl)
+//				if !ok {
+//					return true
+//				}
+//				log.Println("----call ident:", f.Name.Name)
+//				addCallee(d, f)
+//			case *ast.SelectorExpr:
+//				ast.Inspect(e.X, func(node ast.Node) bool {
+//					return true
+//				})
+//				ident, ok := e.X.(*ast.Ident)
+//				if !ok || ident.Obj == nil {
+//					return true
+//				}
+//
+//				f, ok := ident.Obj.Decl.(*ast.Field)
+//				if !ok {
+//					return true
+//				}
+//
+//				se, ok := f.Type.(*ast.StarExpr)
+//				if ok {
+//					ident = se.X.(*ast.Ident)
+//				} else {
+//					ident = f.Type.(*ast.Ident)
+//				}
+//				ts, ok := ident.Obj.Decl.(*ast.TypeSpec)
+//				if !ok {
+//					return true
+//				}
+//				info, ok := typeInfos[ts]
+//				if !ok {
+//					return true
+//				}
+//				for _, decl := range info.methods {
+//					if decl.Name.Name == e.Sel.Name {
+//						log.Println("----call selector:", ts.Name.Name, ".", decl.Name.Name)
+//						addCallee(d, decl)
+//						break
+//					}
+//				}
+//			}
+//
+//			return true
+//		})
+//	}
+//}
