@@ -78,3 +78,7 @@ func call() {
 
 	before.noop()
 }
+
+func getExprReturnType() {
+
+}

@@ -1,7 +1,6 @@
 package parser
 
 import (
-	"fmt"
 	"go/ast"
 	"go/importer"
 	"go/types"
@@ -15,8 +14,13 @@ func TestPrint(t *testing.T) {
 }
 
 func TestCollectTypeInfo(t *testing.T) {
-	fset, f := tools.PrintTree("./testdata/type_spec.go", nil)
-
+	//fset, f := tools.PrintTree("./testdata/type_spec.go", nil)
+	fset, f := tools.PrintTree("./testdata/func.go", nil)
+	//fset := token.NewFileSet()
+	//f, err := parser.ParseFile(fset, "./testdata/func.go", nil, parser.AllErrors)
+	//if err != nil {
+	//	panic(err)
+	//}
 	// 创建类型检查器
 	conf := types.Config{Importer: importer.Default()}
 	info := &types.Info{
@@ -32,7 +36,4 @@ func TestCollectTypeInfo(t *testing.T) {
 
 	CollectTypeSpec(f)
 	CheckReadonly(f, fset, info)
-
-	fmt.Println(typeInfos)
-	fmt.Println(funcInfos)
 }

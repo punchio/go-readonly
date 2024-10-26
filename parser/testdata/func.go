@@ -57,15 +57,37 @@ func (f *foo) get() int {
 
 func (f *foo) get2() ([]int, int) {
 	roItems := f.items
-	return roItems, 1
+	roInt := 1
+	return roItems, roInt
 }
 
 func callF1(f *foo) {
 	f.m1(bar{}, &bar{})
 }
 
+func getManySame() (int, int, int) {
+	return 0, 0, 0
+}
+
+func getManyNotSame() (int, uint, string) {
+	return 0, 0, ""
+}
+
 func callF2(f *foo) {
+	var same1, same2, same3 int = getManySame()
+	var notSame1, notSame2, notSame3 = getManyNotSame()
+	_, _, _ = same1, same2, same3
+	_, _, _ = notSame1, notSame2, notSame3
 	f.m2()
+	var i = f.getItems2()
+	var roI = f.getItems()
+	var i2, iInt = f.get2()
+	roI2, iInt := f.get2()
+	_ = i
+	_ = roI
+	_ = i2
+	_ = iInt
+	_ = roI2
 }
 
 func callCall(f *foo) foo {
