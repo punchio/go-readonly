@@ -8,8 +8,27 @@ type bar struct {
 }
 
 func (bar) noop() {
+	var (
+		vi, vj int32 = 1, 2
+		vs, vt       = "", ""
+	)
+	_, _, _, _ = vi, vj, vs, vt
+	var i, j = 1, ""
+	var ii, ij = 1, 2
+	_, _ = i, j
+	_, _ = ii, ij
+	s := ""
+	_ = s
+	ia := []int{1}
+	_ = ia
+	var ia2 []int
+	_ = ia2
+
 	b := bar{}
 	b.noop()
+
+	f := foo{}
+	f.m3()[1] = 0
 }
 
 func newFoo() *foo {

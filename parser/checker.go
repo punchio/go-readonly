@@ -1,8 +1,8 @@
 /*
-主要检查在变量初始化，赋值两种情况，且只读的基础类型变量不用检查
+变量初始化、赋值两种情况的检查
 基础类型：
 	1. 如果变量的类型为基础类型，不用检查其对应的只读类型
-	2. _ 变量不用检查，可能用在多值返回时，不需要只读变量的情况
+	2. _ 变量不用检查，可以用在多值返回时，不需要只读变量的情况
 数量：
 	1. 多左值，多右值
 		必然左值和右值数量相等，且右值不能有多返回值函数
@@ -16,6 +16,12 @@
 需要检查的语句：
 	1. ast.AssignStmt 赋值语句，要区分对待 := 初始化语句和 = 赋值语句
 	2. ast.DeclStmt 声明语句
+		ast.GenDecl的Specs可以为多个，每一个ast.ValueSpec的判断跟一次 := 流程一样
+
+检查策略
+	1. 收集左值的只读属性
+	2. 收集右值的只读属性，如果右值为基础类型，即使是只读，也标记为非只读
+	3. 根据语句类型，初始化or赋值，比较左右值集合是否满足
 */
 
 package parser
@@ -29,11 +35,63 @@ import (
 	"go/types"
 	"log"
 	"math"
+	"readonly/tools"
 	"slices"
 	"strings"
 )
 
 const roPrefix = "ro"
+
+func check(isAssign bool, lhs, rhs []ast.Expr, lhsFlag, rhsFlag uint64) {
+
+}
+
+func collectLhsFlag(fset *token.FileSet, lhs []ast.Expr) ([]ast.Expr, uint64) {
+	/*
+		左值可能为这些情况
+			变量	*ast.Ident	a = 10
+			指针解引用	*ast.StarExpr	*p = 20
+			数组或切片的元素	*ast.IndexExpr	arr[0] = 5
+			结构体字段	*ast.SelectorExpr	person.name = "John"
+			字典（映射）元素	*ast.IndexExpr	m["key"] = "value"
+			接口变量的底层实现字段	*ast.SelectorExpr	w.Write([]byte("Hello"))
+	*/
+	flag := uint64(0)
+	for i, expr := range lhs {
+		switch expr.(type) {
+		case *ast.Ident,
+			*ast.StarExpr,
+			*ast.IndexExpr,
+			*ast.SelectorExpr:
+			tmp := getExprReadonlyFlag(expr)
+			if tmp > 0 {
+				flag |= 1 << i
+			}
+		default:
+			text := tools.GetExprText(fset, expr)
+			panic(fmt.Sprintf("lhs expr illegal, expr:%s", text))
+		}
+
+	}
+	return lhs, flag
+}
+
+func collectRhsFlag(fset *token.FileSet, info *types.Info, rhs []ast.Expr) ([]ast.Expr, uint64) {
+	flag := uint64(0)
+	for i, expr := range rhs {
+		if t, ok := info.Types[expr]; ok {
+			if _, ok = t.Type.(*types.Basic); ok {
+				continue
+			}
+		}
+
+		tmp := getExprReadonlyFlag(expr)
+		if tmp > 0 {
+			flag |= 1 << i
+		}
+	}
+	return rhs, flag
+}
 
 func checkReadonly(file *ast.File, fset *token.FileSet, info *types.Info) error {
 	for _, v := range funcInfos {
