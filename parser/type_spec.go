@@ -102,7 +102,7 @@ func (i *funcInfo) isRoParam(index int) bool {
 }
 
 func (i *funcInfo) getRoResultFlag() uint64 {
-	return i.roMask & (uint64(math.MaxUint32) << 32)
+	return (i.roMask & (uint64(math.MaxUint32) << 32)) >> 32
 }
 
 func (i *funcInfo) getRoParamFlag() uint64 {

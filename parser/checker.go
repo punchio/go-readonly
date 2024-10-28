@@ -42,11 +42,55 @@ import (
 
 const roPrefix = "ro"
 
-func check(isAssign bool, lhs, rhs []ast.Expr, lhsFlag, rhsFlag uint64) {
+func check(isAssign bool, lhs, rhs []ast.Expr, lhsFlag, rhsFlag uint64, skipFlag uint64, fset *token.FileSet) {
+	skipIndexes := make([]bool, len(lhs))
+	for i := 0; i < len(lhs); i++ {
+		if skipFlag&(1<<i) != 0 {
+			skipIndexes[i] = true
+		}
+	}
+	if isAssign {
+		for i := 0; i < len(lhs); i++ {
+			if skipIndexes[i] {
+				continue
+			}
 
+			if lhsFlag&(1<<i) != 0 {
+				skipIndexes[i] = true
+				var buf bytes.Buffer
+				_ = printer.Fprint(&buf, fset, lhs[i])
+				log.Printf("[lhs:%s,at %v ] cannot be assigned\n", buf.String(), fset.Position(lhs[i].Pos()))
+			}
+		}
+	}
+
+	for i := 0; i < len(lhs); i++ {
+		if skipIndexes[i] {
+			continue
+		}
+
+		// 如果右值为非只读，或者左值是只读，则跳过
+		if rhsFlag&(1<<i) == 0 || lhsFlag&(1<<i) != 0 {
+			continue
+		}
+
+		var rhsBuf, lhsBuf bytes.Buffer
+		_ = printer.Fprint(&lhsBuf, fset, lhs[i])
+		var pos token.Pos
+		if len(rhs) == len(lhs) {
+			pos = rhs[i].Pos()
+			_ = printer.Fprint(&rhsBuf, fset, rhs[i])
+		} else {
+			pos = rhs[0].Pos()
+			_ = printer.Fprint(&rhsBuf, fset, rhs[0])
+		}
+
+		log.Printf("[rhs:%s at %v ] cannot be assigned to \n\t\t[lhs:%s at %v ] variable without readonly\n",
+			rhsBuf.String(), fset.Position(pos), lhsBuf.String(), fset.Position(lhs[i].Pos()))
+	}
 }
 
-func collectLhsFlag(fset *token.FileSet, lhs []ast.Expr) ([]ast.Expr, uint64) {
+func collectLhsFlag(lhs []ast.Expr, fset *token.FileSet) (roFlag uint64, skipFlag uint64) {
 	/*
 		左值可能为这些情况
 			变量	*ast.Ident	a = 10
@@ -56,16 +100,24 @@ func collectLhsFlag(fset *token.FileSet, lhs []ast.Expr) ([]ast.Expr, uint64) {
 			字典（映射）元素	*ast.IndexExpr	m["key"] = "value"
 			接口变量的底层实现字段	*ast.SelectorExpr	w.Write([]byte("Hello"))
 	*/
-	flag := uint64(0)
 	for i, expr := range lhs {
-		switch expr.(type) {
-		case *ast.Ident,
-			*ast.StarExpr,
+		switch t := expr.(type) {
+		case *ast.Ident:
+			if t.Name == "_" {
+				skipFlag |= 1 << i
+				continue
+			}
+
+			tmp := getExprReadonlyFlag(expr)
+			if tmp > 0 {
+				roFlag |= 1 << i
+			}
+		case *ast.StarExpr,
 			*ast.IndexExpr,
 			*ast.SelectorExpr:
 			tmp := getExprReadonlyFlag(expr)
 			if tmp > 0 {
-				flag |= 1 << i
+				roFlag |= 1 << i
 			}
 		default:
 			text := tools.GetExprText(fset, expr)
@@ -73,10 +125,10 @@ func collectLhsFlag(fset *token.FileSet, lhs []ast.Expr) ([]ast.Expr, uint64) {
 		}
 
 	}
-	return lhs, flag
+	return
 }
 
-func collectRhsFlag(fset *token.FileSet, info *types.Info, rhs []ast.Expr) ([]ast.Expr, uint64) {
+func collectRhsFlag(rhs []ast.Expr, fset *token.FileSet, info *types.Info) uint64 {
 	flag := uint64(0)
 	for i, expr := range rhs {
 		if t, ok := info.Types[expr]; ok {
@@ -90,7 +142,20 @@ func collectRhsFlag(fset *token.FileSet, info *types.Info, rhs []ast.Expr) ([]as
 			flag |= 1 << i
 		}
 	}
-	return rhs, flag
+	return flag
+}
+
+func collectAssignStmt(stmt *ast.AssignStmt) (isAssign bool, lhs []ast.Expr, rhs []ast.Expr) {
+	return stmt.Tok == token.ASSIGN, stmt.Lhs, stmt.Rhs
+}
+
+func collectValueSpec(spec *ast.ValueSpec) (isAssign bool, lhs []ast.Expr, rhs []ast.Expr) {
+	isAssign = false
+	for _, v := range spec.Names {
+		lhs = append(lhs, v)
+	}
+	rhs = spec.Values
+	return
 }
 
 func checkReadonly(file *ast.File, fset *token.FileSet, info *types.Info) error {
@@ -99,16 +164,23 @@ func checkReadonly(file *ast.File, fset *token.FileSet, info *types.Info) error 
 			_ = stmt
 			switch e := stmt.(type) {
 			case *ast.AssignStmt:
-				if e.Tok == token.ASSIGN {
-					checkAssign(e, fset, info)
-				} else if e.Tok == token.DEFINE {
-					checkDefine(e, fset, info)
-				}
+				assign, lhs, rhs := collectAssignStmt(e)
+				lhsFlag, skipFlag := collectLhsFlag(lhs, fset)
+				rhsFlag := collectRhsFlag(rhs, fset, info)
+				check(assign, lhs, rhs, lhsFlag, rhsFlag, skipFlag, fset)
 			case *ast.DeclStmt:
 				decl := e.Decl.(*ast.GenDecl)
-				checkDeclStmt(decl, fset, info)
-			default:
-				fmt.Printf("stmt:%T, stmt:%v", e, e)
+				for _, spec := range decl.Specs {
+					valueSpec := spec.(*ast.ValueSpec)
+					assign, lhs, rhs := collectValueSpec(valueSpec)
+					lhsFlag, skipFlag := collectLhsFlag(lhs, fset)
+					rhsFlag := collectRhsFlag(rhs, fset, info)
+					check(assign, lhs, rhs, lhsFlag, rhsFlag, skipFlag, fset)
+				}
+
+				//checkDeclStmt(decl, fset, info)
+				//default:
+				//	fmt.Printf("stmt:%T, stmt:%v", e, e)
 			}
 		}
 	}
@@ -369,7 +441,9 @@ func getExprDeclType(expr ast.Expr) []*ast.TypeSpec {
 				if nameCount == 0 {
 					nameCount = 1
 				}
-				funcResult = append(funcResult, slices.Repeat([]*ast.TypeSpec{ts}, nameCount)...)
+				for i := 0; i < nameCount; i++ {
+					funcResult = append(funcResult, ts)
+				}
 			}
 			return funcResult
 		}
@@ -379,6 +453,8 @@ func getExprDeclType(expr ast.Expr) []*ast.TypeSpec {
 		return getExprDeclType(t.X)
 	case *ast.StarExpr:
 		return getExprDeclType(t.X)
+	case *ast.CompositeLit:
+		return getExprDeclType(t.Type)
 	}
 	return nil
 }
@@ -433,6 +509,8 @@ func getSelectorRoFlag(sel *ast.SelectorExpr) uint64 {
 				break
 			}
 		}
+	case *ast.Field:
+		ident = getFinalIdent(t.Type)
 	default:
 		panic("selector type not found")
 	}
