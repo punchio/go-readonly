@@ -85,12 +85,15 @@ func check(isAssign bool, lhs, rhs []ast.Expr, lhsFlag, rhsFlag uint64, skipFlag
 			_ = printer.Fprint(&rhsBuf, fset, rhs[0])
 		}
 
-		log.Printf("[rhs:%s at %v ] cannot be assigned to \n\t\t[lhs:%s at %v ] variable without readonly\n",
-			rhsBuf.String(), fset.Position(pos), lhsBuf.String(), fset.Position(lhs[i].Pos()))
+		log.Printf("variable [lhs:%s at %v ] cannot assigned with \n\t\t\t\tvariable readonly [rhs:%s at %v ] ",
+			lhsBuf.String(), fset.Position(lhs[i].Pos()),
+			rhsBuf.String(), fset.Position(pos))
 	}
 }
 
-func collectLhsFlag(lhs []ast.Expr, fset *token.FileSet) (roFlag uint64, skipFlag uint64) {
+// collectLhsFlag 获取左值的只读标记和跳过标记
+// 左值和右值不一样的地方在于，左值类型限制更严格，右值更随意一些
+func collectLhsFlag(lhs []ast.Expr, fset *token.FileSet, info *types.Info) (roFlag uint64, skipFlag uint64) {
 	/*
 		左值可能为这些情况
 			变量	*ast.Ident	a = 10
@@ -103,9 +106,17 @@ func collectLhsFlag(lhs []ast.Expr, fset *token.FileSet) (roFlag uint64, skipFla
 	for i, expr := range lhs {
 		switch t := expr.(type) {
 		case *ast.Ident:
+			// 需要对 _ 特殊处理
 			if t.Name == "_" {
 				skipFlag |= 1 << i
 				continue
+			}
+
+			if obj := info.Defs[t]; obj != nil {
+				if _, ok := obj.Type().(*types.Basic); ok {
+					skipFlag |= 1 << i
+					continue
+				}
 			}
 
 			tmp := getExprReadonlyFlag(expr)
@@ -128,15 +139,12 @@ func collectLhsFlag(lhs []ast.Expr, fset *token.FileSet) (roFlag uint64, skipFla
 	return
 }
 
-func collectRhsFlag(rhs []ast.Expr, fset *token.FileSet, info *types.Info) uint64 {
+func collectRhsFlag(rhs []ast.Expr, skipFlag uint64) uint64 {
 	flag := uint64(0)
 	for i, expr := range rhs {
-		if t, ok := info.Types[expr]; ok {
-			if _, ok = t.Type.(*types.Basic); ok {
-				continue
-			}
+		if skipFlag&(1<<i) != 0 {
+			continue
 		}
-
 		tmp := getExprReadonlyFlag(expr)
 		if tmp > 0 {
 			flag |= 1 << i
@@ -165,241 +173,41 @@ func checkReadonly(file *ast.File, fset *token.FileSet, info *types.Info) error 
 			switch e := stmt.(type) {
 			case *ast.AssignStmt:
 				assign, lhs, rhs := collectAssignStmt(e)
-				lhsFlag, skipFlag := collectLhsFlag(lhs, fset)
-				rhsFlag := collectRhsFlag(rhs, fset, info)
+				lhsFlag, skipFlag := collectLhsFlag(lhs, fset, info)
+				rhsFlag := collectRhsFlag(rhs, skipFlag)
 				check(assign, lhs, rhs, lhsFlag, rhsFlag, skipFlag, fset)
 			case *ast.DeclStmt:
 				decl := e.Decl.(*ast.GenDecl)
 				for _, spec := range decl.Specs {
 					valueSpec := spec.(*ast.ValueSpec)
 					assign, lhs, rhs := collectValueSpec(valueSpec)
-					lhsFlag, skipFlag := collectLhsFlag(lhs, fset)
-					rhsFlag := collectRhsFlag(rhs, fset, info)
+					lhsFlag, skipFlag := collectLhsFlag(lhs, fset, info)
+					rhsFlag := collectRhsFlag(rhs, skipFlag)
 					check(assign, lhs, rhs, lhsFlag, rhsFlag, skipFlag, fset)
 				}
+			case *ast.RangeStmt:
+				typ, ok := info.Types[e.X]
+				if !ok {
+					panic(fmt.Sprintf("not found type,text:%s", tools.GetExprText(fset, e.X)))
+				}
 
-				//checkDeclStmt(decl, fset, info)
-				//default:
-				//	fmt.Printf("stmt:%T, stmt:%v", e, e)
+				var lhs, rhs []ast.Expr
+				if _, ok = typ.Type.(*types.Map); ok {
+					lhs = append(lhs, e.Key, e.Value)
+				} else if _, ok = typ.Type.(*types.Slice); ok {
+					lhs = append(lhs, e.Value)
+				} else {
+					panic(fmt.Sprintf("unsupported range type,text:%s", tools.GetExprText(fset, e.X)))
+				}
+				rhs = append(rhs, e.X)
+				lhsFlag, skipFlag := collectLhsFlag(lhs, fset, info)
+				rhsFlag := collectRhsFlag(rhs, skipFlag)
+				rhsFlag |= rhsFlag << 1
+				check(false, lhs, rhs, lhsFlag, rhsFlag, skipFlag, fset)
 			}
 		}
 	}
 	return nil
-}
-
-func checkDeclStmt(decl *ast.GenDecl, fset *token.FileSet, info *types.Info) {
-	for _, spec := range decl.Specs {
-		vs := spec.(*ast.ValueSpec)
-		basicType := false
-		skipIndexes := make([]bool, len(vs.Names))
-		// 基础类型变量不用检查只读
-		if t, ok := info.Types[vs.Type]; ok {
-			if _, ok = t.Type.(*types.Basic); ok {
-				basicType = true
-			}
-		}
-
-		// 如果数量不等，必然是一个函数多值返回值;否则，右值都是单一返回值函数或者变量
-		if len(vs.Names) != len(vs.Values) {
-			// 只读左值不能初始化不用检查
-			for i, v := range vs.Names {
-				if basicType || strings.HasPrefix(v.Name, roPrefix) || v.Name == "_" {
-					skipIndexes[i] = true
-				}
-			}
-
-			call := vs.Values[0].(*ast.CallExpr)
-			flag := getRoFuncFlag(call)
-			for i := 0; i < len(vs.Names); i++ {
-				if skipIndexes[i] {
-					continue
-				}
-				if flag&(1<<i) != 0 {
-					var lhsBuf bytes.Buffer
-					_ = printer.Fprint(&lhsBuf, fset, vs.Names[i])
-					var rhsBuf bytes.Buffer
-					_ = printer.Fprint(&rhsBuf, fset, vs.Values[0])
-					log.Printf("Invalid assignment to %s from %s at %v\n", lhsBuf.String(), rhsBuf.String(), fset.Position(vs.Names[i].Pos()))
-					return
-				}
-			}
-		} else {
-			// 只读左值不能初始化不用检查
-			for i, v := range vs.Names {
-				if basicType || strings.HasPrefix(v.Name, roPrefix) || v.Name == "_" {
-					skipIndexes[i] = true
-				}
-			}
-
-			for i, value := range vs.Values {
-				if skipIndexes[i] {
-					continue
-				}
-				checkFail := false
-				switch e := value.(type) {
-				case *ast.Ident:
-					// 直接的标识符
-					checkFail = strings.HasPrefix(e.Name, roPrefix)
-				case *ast.SelectorExpr:
-					checkFail = strings.HasPrefix(e.Sel.Name, roPrefix)
-					// 结构体变量，可能会调用函数，所以要检查选择器flag
-					if !checkFail && getSelectorRoFlag(e) > 0 {
-						checkFail = true
-					}
-				case *ast.CallExpr:
-					// 检查函数返回值，肯定是一个返回值，所以直接判断是否大于0即可
-					if getRoFuncFlag(e) > 0 {
-						checkFail = true
-					}
-				default:
-					continue
-				}
-				if checkFail {
-					var lhsBuf bytes.Buffer
-					_ = printer.Fprint(&lhsBuf, fset, vs.Names[i])
-					var rhsBuf bytes.Buffer
-					_ = printer.Fprint(&rhsBuf, fset, value)
-					log.Printf("Invalid assignment to %s from %s at %v\n", lhsBuf.String(), rhsBuf.String(), fset.Position(vs.Names[i].Pos()))
-					return
-				}
-			}
-		}
-
-	}
-}
-
-func checkDefine(assignStmt *ast.AssignStmt, fset *token.FileSet, info *types.Info) {
-	skipIndexes := make([]bool, len(assignStmt.Lhs))
-	// 只读左值不能被赋值
-	for i, lhs := range assignStmt.Lhs {
-		// 基础类型变量不用检查只读
-		if t, ok := info.Types[lhs]; ok {
-			if _, ok = t.Type.(*types.Basic); ok {
-				skipIndexes[i] = true
-				continue
-			}
-		}
-
-		ident := lhs.(*ast.Ident)
-		if strings.HasPrefix(ident.Name, roPrefix) || ident.Name == "_" {
-			skipIndexes[i] = true
-		}
-	}
-
-	// 右值不能赋值非基础类型
-	// 目前只检测了lhs数量和rhs数量一样的情况
-	for i, rhs := range assignStmt.Rhs {
-		if skipIndexes[i] {
-			continue
-		}
-
-		checkFail := false
-		switch e := rhs.(type) {
-		case *ast.Ident:
-			// 直接的标识符
-			checkFail = strings.HasPrefix(e.Name, roPrefix)
-		case *ast.SelectorExpr:
-			checkFail = strings.HasPrefix(e.Sel.Name, roPrefix)
-			// 结构体字段
-			if !checkFail && getSelectorRoFlag(e) > 0 {
-				checkFail = true
-			}
-		case *ast.CallExpr:
-			if getRoFuncFlag(e) > 0 {
-				checkFail = true
-			}
-		default:
-			continue
-		}
-		if checkFail {
-			var lhsBuf bytes.Buffer
-			_ = printer.Fprint(&lhsBuf, fset, assignStmt.Lhs[i])
-			var rhsBuf bytes.Buffer
-			_ = printer.Fprint(&rhsBuf, fset, rhs)
-			log.Printf("Invalid assignment to %s from %s at %v\n", lhsBuf.String(), rhsBuf.String(), fset.Position(assignStmt.Lhs[i].Pos()))
-			return
-		}
-	}
-}
-
-func checkAssign(assignStmt *ast.AssignStmt, fset *token.FileSet, info *types.Info) {
-	skipIndexes := make([]bool, len(assignStmt.Lhs))
-	// 只读左值不能被赋值
-	for i, lhs := range assignStmt.Lhs {
-		// 基础类型变量不用检查只读
-		if t, ok := info.Types[lhs]; ok {
-			if _, ok = t.Type.(*types.Basic); ok {
-				skipIndexes[i] = true
-				continue
-			}
-		}
-
-		lhsExprName := ""
-		switch e := lhs.(type) {
-		case *ast.Ident:
-			lhsExprName = e.Name
-			// 直接的标识符
-		case *ast.SelectorExpr:
-			// 结构体字段
-			ident, _ := getSelectorTree(e)
-			lhsExprName = ident.Name
-		default:
-			panic("unsupported assign lhs")
-		}
-
-		if lhsExprName == "_" {
-			skipIndexes[i] = true
-			continue
-		}
-
-		if strings.HasPrefix(lhsExprName, roPrefix) {
-			skipIndexes[i] = true
-			var buf bytes.Buffer
-			_ = printer.Fprint(&buf, fset, lhs)
-			log.Printf("Invalid assignment to %s from %s at %v\n", lhsExprName, buf.String(), fset.Position(lhs.Pos()))
-			continue
-		}
-	}
-
-	// 右值不能赋值非基础类型
-	// 目前只检测了lhs数量和rhs数量一样的情况
-	for i, rhs := range assignStmt.Rhs {
-		if skipIndexes[i] {
-			continue
-		}
-
-		getExprReadonlyFlag(rhs)
-		checkFail := false
-		switch e := rhs.(type) {
-		case *ast.Ident:
-			// 直接的标识符
-			checkFail = strings.HasPrefix(e.Name, roPrefix)
-		case *ast.SelectorExpr:
-			checkFail = strings.HasPrefix(e.Sel.Name, roPrefix)
-			// 结构体字段
-			if !checkFail {
-				flag := getSelectorRoFlag(e)
-				// 不为0，表示对应结果是只读的
-				if flag&(1<<i) != 0 {
-					checkFail = true
-				}
-			}
-		case *ast.CallExpr:
-			if getRoFuncFlag(e) != 0 {
-				checkFail = true
-			}
-		default:
-			continue
-		}
-		if checkFail {
-			var lhsBuf bytes.Buffer
-			_ = printer.Fprint(&lhsBuf, fset, assignStmt.Lhs[i])
-			var rhsBuf bytes.Buffer
-			_ = printer.Fprint(&rhsBuf, fset, rhs)
-			log.Printf("Invalid assignment to %s from %s at %v\n", lhsBuf.String(), rhsBuf.String(), fset.Position(assignStmt.Lhs[i].Pos()))
-			return
-		}
-	}
 }
 
 func getSelectorTree(sel *ast.SelectorExpr) (*ast.Ident, []string) {
@@ -446,6 +254,54 @@ func getExprDeclType(expr ast.Expr) []*ast.TypeSpec {
 				}
 			}
 			return funcResult
+		} else if t.Obj.Kind == ast.Var {
+			f, ok := t.Obj.Decl.(*ast.Field)
+			if ok {
+				return getExprDeclType(f.Type)
+			}
+
+			assignStmt := t.Obj.Decl.(*ast.AssignStmt)
+			for i, lhs := range assignStmt.Lhs {
+				if lhs == expr {
+					switch t := assignStmt.Rhs[i].(type) {
+					case *ast.BasicLit:
+						return []*ast.TypeSpec{nil}
+					case *ast.CompositeLit:
+						return getExprDeclType(t.Type)
+					case *ast.CallExpr:
+						return getExprDeclType(t.Fun)
+					case *ast.SelectorExpr:
+						return getExprDeclType(t.X)
+					case *ast.IndexExpr:
+						return getExprDeclType(t.X)
+					case *ast.IndexListExpr:
+						return getExprDeclType(t.X)
+					case *ast.UnaryExpr:
+						if t.Op == token.RANGE {
+							var ts []*ast.TypeSpec
+							ast.Inspect(t.X, func(node ast.Node) bool {
+								switch t := node.(type) {
+								case *ast.MapType:
+									if i == 0 {
+										ts = append(ts, getExprDeclType(t.Key)...)
+									} else {
+										ts = append(ts, getExprDeclType(t.Value)...)
+									}
+									return false
+								case *ast.ArrayType:
+									ts = append(ts, getExprDeclType(t.Elt)...)
+									return false
+								}
+								return true
+							})
+						}
+						return getExprDeclType(t.X)
+					case *ast.BinaryExpr:
+						return getExprDeclType(t.X)
+					}
+					break
+				}
+			}
 		}
 	case *ast.CallExpr:
 		return getExprDeclType(t.Fun)
@@ -455,6 +311,16 @@ func getExprDeclType(expr ast.Expr) []*ast.TypeSpec {
 		return getExprDeclType(t.X)
 	case *ast.CompositeLit:
 		return getExprDeclType(t.Type)
+	case *ast.UnaryExpr:
+		return getExprDeclType(t.X)
+	case *ast.BinaryExpr:
+		return getExprDeclType(t.X)
+	case *ast.BasicLit:
+		return []*ast.TypeSpec{nil}
+	case *ast.IndexExpr:
+		return getExprDeclType(t.X)
+	case *ast.IndexListExpr:
+		return getExprDeclType(t.X)
 	}
 	return nil
 }
@@ -476,6 +342,8 @@ func getExprReadonlyFlag(expr ast.Expr) uint64 {
 		return getExprReadonlyFlag(t.X)
 	case *ast.IndexListExpr:
 		return getExprReadonlyFlag(t.X)
+	case *ast.UnaryExpr:
+		return getExprReadonlyFlag(t.X)
 	default:
 		return 0
 	}
@@ -496,11 +364,76 @@ func getRoFuncFlag(call *ast.CallExpr) uint64 {
 	return info.getRoResultFlag()
 }
 
+func getIdentTypeIdent(ident *ast.Ident) *ast.Ident {
+	if ident.Obj.Kind == ast.Typ {
+		switch t := ident.Obj.Decl.(type) {
+		case *ast.TypeSpec:
+			return t.Name
+		case *ast.Field:
+			return getFinalIdent(t.Type)
+		case *ast.ImportSpec:
+			return t.Name
+		default:
+			panic("type ident not found")
+		}
+	} else if ident.Obj.Kind == ast.Fun {
+		d := ident.Obj.Decl.(*ast.FuncDecl)
+		return d.Name
+	} else if ident.Obj.Kind == ast.Con {
+		vs := ident.Obj.Decl.(*ast.ValueSpec)
+		for i, name := range vs.Names {
+			if ident.Name == name.Name {
+				if len(vs.Names) != len(vs.Values) {
+					result := vs.Values[i].(*ast.Ident)
+					return result
+				} else {
+					result := vs.Values[i].(*ast.Ident)
+					return result
+				}
+			}
+		}
+	} else if ident.Obj.Kind == ast.Var {
+		switch t := ident.Obj.Decl.(type) {
+		case *ast.AssignStmt:
+			if len(t.Lhs) == len(t.Rhs) {
+				for i, lhs := range t.Lhs {
+					tmp := lhs.(*ast.Ident)
+					if tmp.Name == ident.Name {
+						ident = getIdentType(t.Rhs[i])
+						return getIdentTypeIdent(ident)
+					}
+				}
+			} else {
+
+			}
+		case *ast.Field: // 方法结构体参数
+			ident = getIdentType(t.Type)
+			return getIdentTypeIdent(ident)
+		case *ast.CompositeLit:
+			ident = getIdentType(t.Type)
+			return getIdentTypeIdent(ident)
+		}
+	}
+	panic("ident not found")
+}
+
+func getIdentType(expr ast.Expr) *ast.Ident {
+	switch t := expr.(type) {
+	case *ast.CompositeLit:
+		return t.Type.(*ast.Ident)
+	case *ast.SelectorExpr:
+		ident, sels := getSelectorTree(t)
+
+	}
+	panic("expr not found")
+}
+
 func getSelectorRoFlag(sel *ast.SelectorExpr) uint64 {
 	// 获取选择器的第一个标识符
 	ident, sels := getSelectorTree(sel)
+	ident = getIdentTypeIdent(ident)
 	switch t := ident.Obj.Decl.(type) {
-	case *ast.AssignStmt:
+	case *ast.AssignStmt: // 临时变量
 		for i, lhs := range t.Lhs {
 			tmp := lhs.(*ast.Ident)
 			if tmp.Name == ident.Name {
@@ -509,8 +442,15 @@ func getSelectorRoFlag(sel *ast.SelectorExpr) uint64 {
 				break
 			}
 		}
-	case *ast.Field:
+	case *ast.Field: // 方法结构体参数
 		ident = getFinalIdent(t.Type)
+	case *ast.ValueSpec:
+		for i, name := range t.Names {
+			if name.Name == ident.Name {
+				//t.Values[i]
+				_ = i
+			}
+		}
 	default:
 		panic("selector type not found")
 	}

@@ -1,5 +1,15 @@
 package testdata
 
+import "fmt"
+
+const (
+	a, b = 1, ""
+)
+
+type MyType int
+type Wrapper struct {
+	Inner MyType
+}
 type foo struct {
 	items []int
 }
@@ -9,10 +19,15 @@ type bar struct {
 
 func (bar) noop() {
 	var (
-		vi, vj int32 = 1, 2
-		vs, vt       = "", ""
+		vi, vj   int32 = 1, 2
+		vii, vjj int32 = vi, vj
+		vs, vt         = "", ""
 	)
+	var wp Wrapper
+	vs = fmt.Sprintln(vi, vj)
+	wp.Inner = MyType(vi)
 	_, _, _, _ = vi, vj, vs, vt
+	_, _ = vii, vjj
 	var i, j = 1, ""
 	var ii, ij = 1, 2
 	_, _ = i, j
@@ -24,11 +39,68 @@ func (bar) noop() {
 	var ia2 []int
 	_ = ia2
 
+	var ff = foo{}
+	ff.m3()[1] = 0
+
 	b := bar{}
 	b.noop()
 
 	f := foo{}
 	f.m3()[1] = 0
+	f.getItems2()[0] = 0
+
+	var roMap map[int]int = map[int]int{}
+	roMap[0] = 1
+
+	var roSlice []int = f.getItems2()
+	roSubSlice := roSlice[0:1]
+	_ = roSubSlice
+	subSlice := roSubSlice
+	_ = subSlice
+	var sliceItem = roSlice[0]
+	_ = sliceItem
+	for i, roV := range roSlice {
+		i = 0
+		roV = 1
+		_, _ = i, roV
+	}
+	for i, v := range roSlice {
+		i = 0
+		v = 1
+		_, _ = i, v
+	}
+	var sliceSt = []foo{}
+	for _, roV := range sliceSt {
+		_ = roV
+	}
+	var roSliceSt = []foo{}
+	for _, roV := range roSliceSt {
+		_ = roV
+	}
+	for _, v := range roSliceSt {
+		_ = v
+	}
+	var mapSt map[int]foo
+	for k, roV := range mapSt {
+		_, _ = k, roV
+	}
+	var roSliceMap = map[int]foo{}
+	for k, v := range roSliceMap {
+		_, _ = k, v
+	}
+	for k, roV := range roSliceMap {
+		_, _ = k, roV
+	}
+	var roStStMap = map[*foo]foo{}
+	for k, v := range roStStMap {
+		_, _ = k, v
+	}
+	for k, roV := range roStStMap {
+		_, _ = k, roV
+	}
+	for roK, roV := range roStStMap {
+		_, _ = roK, roV
+	}
 }
 
 func newFoo() *foo {
