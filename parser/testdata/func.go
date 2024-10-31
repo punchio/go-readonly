@@ -1,5 +1,7 @@
 package testdata
 
+import "readonly/parser/testdata/pkg"
+
 const (
 	a, b = 1, ""
 )
@@ -186,6 +188,15 @@ func callF2(f *foo) {
 	_ = i2
 	_ = iInt
 	_ = roI2
+	pkg.CallNormal(1, 2)
+	var roArr, arr []int
+	var roInt int
+	pkg.CallRoParam(roArr, 1)
+	pkg.CallRoParam(arr, roInt)
+	roMap, _ := pkg.CallRoResult(roArr, roInt)
+	_ = roMap
+	var roPropagate, propagate = pkg.CallRoPropagate(), pkg.CallRoPropagate()
+	_, _ = roPropagate, propagate
 }
 
 func callCall(f *foo) foo {

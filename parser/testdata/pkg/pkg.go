@@ -2,7 +2,7 @@ package pkg
 
 import "readonly/parser/testdata/pkg2"
 
-func NormalCall(p1, p2 int) {
+func CallNormal(p1, p2 int) {
 
 }
 
