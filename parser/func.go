@@ -42,7 +42,7 @@ package parser
 //				switch e := root.Obj.Decl.(type) {
 //				case *ast.FuncDecl:
 //					addCallee(d, e)
-//					//ident := getFinalIdent(e.Type.Results.List[0].Type)
+//					//ident := getStarIdent(e.Type.Results.List[0].Type)
 //					//st := ident.Obj.Decl.(*ast.StructType)
 //				case *ast.StructType:
 //

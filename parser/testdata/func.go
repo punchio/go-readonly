@@ -1,7 +1,5 @@
 package testdata
 
-import "fmt"
-
 const (
 	a, b = 1, ""
 )
@@ -24,7 +22,7 @@ func (bar) noop() {
 		vs, vt         = "", ""
 	)
 	var wp Wrapper
-	vs = fmt.Sprintln(vi, vj)
+	//vs = fmt.Sprintln(vi, vj)
 	wp.Inner = MyType(vi)
 	_, _, _, _ = vi, vj, vs, vt
 	_, _ = vii, vjj
@@ -39,8 +37,13 @@ func (bar) noop() {
 	var ia2 []int
 	_ = ia2
 
-	var ff = foo{}
+	var ff, roFf = foo{}, foo{}
 	ff.m3()[1] = 0
+
+	callRoParam(&ff, &ff)
+	callRoParam(&roFf, &roFf)
+	callRoParam(&ff, &roFf)
+	callRoParam(&roFf, &ff)
 
 	b := bar{}
 	b.noop()
@@ -174,6 +177,10 @@ func callF2(f *foo) {
 	var roI = f.getItems()
 	var i2, iInt = f.get2()
 	roI2, iInt := f.get2()
+	var i3 = getRoItems3(f)
+	roI3 := getRoItems3(f)
+	_ = roI3
+	_ = i3
 	_ = i
 	_ = roI
 	_ = i2
@@ -198,4 +205,9 @@ func getRoItems2(f *foo) []int {
 
 func getRoItems3(f *foo) []int {
 	return f.getItems2()
+}
+
+func callRoParam(f *foo, roF *foo) {
+	var i = getRoItems(f)
+	_ = i
 }
