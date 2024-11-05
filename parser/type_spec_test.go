@@ -13,6 +13,13 @@ func TestPrint(t *testing.T) {
 	tools.PrintTree("./testdata/example.go", nil)
 }
 
+func TestFile(t *testing.T) {
+	fset, f := tools.PrintTree("./testdata/example.go", nil)
+	collectTypeSpec(f)
+	fixFuncRoMask()
+	CheckReadonly(fset)
+}
+
 func TestCollectTypeInfo(t *testing.T) {
 	//fset, f := tools.PrintTree("./testdata/type_spec.go", nil)
 	//fset, f := tools.PrintTree("./testdata/func.go", nil)

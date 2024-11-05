@@ -44,3 +44,33 @@ func f2() {
 		v1, v2, v3, v4, v5, v6, v7, v8, v9, v10, v11, v12, v13,
 		v100, v101)
 }
+
+func ro1() (roInt []int) {
+	var arrInt []int
+	return arrInt
+}
+func ro2() (roInt []int, i1 int, i2 []int) {
+	var arrInt []int
+	return arrInt, 0, nil
+}
+func ro3(roInt []int, i1 int, i2 []int) {
+}
+
+func test() {
+	var drain []any
+
+	var roI1, roI2 int = 1, 2
+	roI1 = 2        // 不能赋值
+	var roI3 = roI2 // 可以初始化
+
+	var roInts1 = ro1()
+	var ints1 = ro1() // 不能初始化为非只读
+	roInts, i1, roInts3 := ro2()
+
+	ro3(roInts1, i1, nil)
+	ro3(roInts1, i1, roInts3) // roInts3 不能用于非只读参数
+
+	drain = append(drain, roI1, roI2, roI3,
+		roInts1, ints1, roInts, roInts3,
+		i1)
+}
