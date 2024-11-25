@@ -1,14 +1,12 @@
 package parser
 
 import (
-	"context"
 	"go/ast"
 	"go/parser"
 	"go/token"
 	"go/types"
 	"readonly/tools"
 	"testing"
-	"time"
 )
 
 func TestPrint(t *testing.T) {
@@ -65,27 +63,4 @@ func TestCollectTypeInfo(t *testing.T) {
 
 	CollectTypeSpec(pkgs)
 	CheckReadonly(fset)
-}
-
-func TestTimer(t *testing.T) {
-	ctx, cancel := context.WithTimeout(context.Background(), time.Minute)
-	defer cancel()
-	count := 100000
-	for i := 0; i < count; i++ {
-		createTimer(ctx)
-	}
-	time.Sleep(time.Minute)
-}
-
-func createTimer(ctx context.Context) {
-	go func() {
-		t := time.NewTicker(time.Second)
-		for {
-			select {
-			case <-t.C:
-			case <-ctx.Done():
-				return
-			}
-		}
-	}()
 }
