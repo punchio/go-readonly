@@ -381,6 +381,8 @@ func getRoFuncParamFlag(call *ast.CallExpr) uint64 {
 func getSelectorRoFlag(sel *ast.SelectorExpr) uint64 {
 	// 获取选择器的第一个标识符
 	ident, names := getSelectorSequence(sel)
+	var tmpExpr ast.Expr = ident
+	_ = tmpExpr
 	if ident.Obj.Kind == ast.Var && checkName(ident.Name) {
 		return 1
 	}

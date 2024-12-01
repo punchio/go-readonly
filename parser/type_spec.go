@@ -3,9 +3,22 @@ package parser
 import (
 	"go/ast"
 	"go/token"
+	"go/types"
 	"math"
 	"strings"
 )
+
+var info = &types.Info{
+	Types:        make(map[ast.Expr]types.TypeAndValue),
+	Instances:    make(map[*ast.Ident]types.Instance),
+	Defs:         make(map[*ast.Ident]types.Object),
+	Uses:         make(map[*ast.Ident]types.Object),
+	Implicits:    map[ast.Node]types.Object{},
+	Scopes:       map[ast.Node]*types.Scope{},
+	Selections:   map[*ast.SelectorExpr]*types.Selection{},
+	InitOrder:    []*types.Initializer{},
+	FileVersions: map[*ast.File]string{},
+}
 
 var structInfos = make(map[*ast.StructType]*typeInfo)
 var funcTypeInfos = make(map[*ast.FuncType]*funcInfo)
@@ -105,7 +118,7 @@ func calcFuncResultMask(funcType *ast.FuncType, body *ast.BlockStmt) uint64 {
 					}
 					index++
 				}
-			} else {
+			} else if len(returnStmt.Results) == 1 {
 				call := returnStmt.Results[0].(*ast.CallExpr)
 				roMask |= getRoFuncResultFlag(call) << index
 			}
@@ -192,11 +205,9 @@ func buildFuncInfo(funcDecl *ast.FuncDecl) *funcInfo {
 	fi.calcMask()
 	return fi
 }
-func CollectTypeSpec(pkgs map[string]*ast.Package) {
-	for _, pkg := range pkgs {
-		for _, f := range pkg.Files {
-			collectTypeSpec(f)
-		}
+func CollectTypeSpec(files []*ast.File) {
+	for _, f := range files {
+		collectTypeSpec(f)
 	}
 	fixFuncRoMask()
 }
