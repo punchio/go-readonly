@@ -1,0 +1,3 @@
+linters-settings:
+  readonly:
+    prefix: "ro"
