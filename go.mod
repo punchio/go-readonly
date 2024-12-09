@@ -1,4 +1,4 @@
-module readonly
+module github.com/username/go-readonly
 
 go 1.22.5
 
