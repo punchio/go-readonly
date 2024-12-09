@@ -91,7 +91,10 @@ func checkStmt(pass *analysis.Pass, stmt ast.Stmt) {
 	case *ast.DeclStmt:
 		decl := e.Decl.(*ast.GenDecl)
 		for _, spec := range decl.Specs {
-			valueSpec := spec.(*ast.ValueSpec)
+			valueSpec, ok := spec.(*ast.ValueSpec)
+			if !ok {
+				continue
+			}
 			assign, lhs, rhs := collectValueSpec(valueSpec)
 			lhsFlag, skipFlag := collectLhsFlag(lhs)
 			rhsFlag := collectRhsFlag(rhs, skipFlag)
