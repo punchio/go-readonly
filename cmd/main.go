@@ -1,8 +1,8 @@
 package main
 
 import (
+	"github.com/punchio/go-readonly"
 	"os"
-	"readonly"
 )
 
 func main() {
