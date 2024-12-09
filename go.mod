@@ -1,4 +1,4 @@
-module github.com/username/go-readonly
+module github.com/punchio/readonly
 
 go 1.22.5
 
