@@ -5,5 +5,8 @@ import (
 )
 
 func TestFromTestdata(t *testing.T) {
-	checkDir("./testdata")
+	output := Run("./testdata")
+	for _, s := range output {
+		t.Log(s)
+	}
 }

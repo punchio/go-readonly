@@ -6,5 +6,5 @@ import (
 )
 
 func main() {
-	readonly.CheckDir(os.Args[1])
+	readonly.Run(os.Args[1:]...)
 }

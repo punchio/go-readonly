@@ -2,70 +2,48 @@ package readonly
 
 import (
 	"bytes"
-	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
 	"go/types"
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
-	"log"
 	"path/filepath"
-	"slices"
 )
 
-func checkDir(dir string) {
-	// 配置解析选项
-	cfg := &packages.Config{
-		Mode:  packages.NeedName | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule,
-		Dir:   dir,   // 指定项目目录
-		Tests: false, // 不包含测试文件
-	}
+func initTypes(pkgs []*packages.Package) []*inspector.Inspector {
+	allPackages = pkgs
+	funcTypes = make(map[token.Pos]*funcInfo)
+	moduleDir = pkgs[0].Module.Dir
 
-	// 加载所有 package
-	pkgs, err := packages.Load(cfg, "./...")
-	if err != nil {
-		panic(fmt.Sprintf("loading packages fail, err: %v", err))
-		return
-	}
-	initTypes(pkgs)
-
-	analyzer := &analysis.Analyzer{
-		Name: linterName,
-		Doc:  "check variable with 'ro' start", // 文档说明
-		Run:  runAnalyzer,                      // 执行分析的函数
-	}
-
-	// 遍历加载的包并执行分析
+	var inspectors []*inspector.Inspector
 	for _, pkg := range pkgs {
-		var diag []analysis.Diagnostic
-		pass := &analysis.Pass{
-			Analyzer:  analyzer, // 需要定义你的分析器
-			Fset:      pkg.Fset,
-			Files:     pkg.Syntax,
-			TypesInfo: pkg.TypesInfo,
-			Pkg:       pkg.Types,
-			Report: func(diagnostic analysis.Diagnostic) {
-				diag = append(diag, diagnostic)
-			}, // 需要定义一个报告函数
-			TypesSizes: pkg.TypesSizes,
-			// 你可以根据需要设置其他字段
-		}
+		i := inspector.New(pkg.Syntax)
+		inspectors = append(inspectors, i)
+		i.Preorder([]ast.Node{&ast.FuncDecl{}}, func(n ast.Node) {
+			fd := n.(*ast.FuncDecl)
+			object := pkg.TypesInfo.Defs[fd.Name].(*types.Func)
+			info := &funcInfo{decl: fd, fullName: object.FullName()}
+			info.calcDecl()
+			funcTypes[fd.Name.Pos()] = info
+		})
+	}
 
-		_, _ = analyzer.Run(pass)
-
-		var messages []string
-		for _, v := range diag {
-			pos := getPosition(pkg.Fset, v.Pos)
-			msg := fmt.Sprintf("%v: %s", pos, v.Message)
-			if slices.Index(messages, msg) == -1 {
-				messages = append(messages, msg)
+	for i := 0; i < 100; i++ {
+		changed := false
+		for _, info := range funcTypes {
+			old := info.roMask
+			info.calcBody()
+			if old != info.roMask {
+				changed = true
 			}
 		}
-		for _, v := range messages {
-			log.Println(v)
+		if !changed {
+			break
 		}
 	}
+	return inspectors
 }
 
 func checkStmt(pass *analysis.Pass, stmt ast.Stmt) {

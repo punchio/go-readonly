@@ -1,19 +1,20 @@
 package readonly
 
 import (
+	"fmt"
 	"go/ast"
 	"go/token"
-	"go/types"
 	"golang.org/x/tools/go/analysis"
+	"golang.org/x/tools/go/analysis/passes/inspect"
+	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
+	"slices"
+	"sync"
 )
 
-//func New(ro *config.ReadonlySettings) *goanalysis.Linter {
-//	a := NewAnalyzer()
-//	return goanalysis.NewLinter(a.Name, a.Doc, []*analysis.Analyzer{a}, nil).WithContextSetter(func(context *linter.Context) {
-//		initTypes(context.Packages)
-//	}).WithLoadMode(goanalysis.LoadModeTypesInfo)
-//}
+func Setup(pkgs []*packages.Package) {
+	initTypes(pkgs)
+}
 
 func NewAnalyzer() *analysis.Analyzer {
 	return &analysis.Analyzer{
@@ -23,12 +24,12 @@ func NewAnalyzer() *analysis.Analyzer {
 	}
 }
 
-func Setup(pkgs []*packages.Package) {
-	initTypes(pkgs)
-}
-
-func CheckDir(dir string) {
-	checkDir(dir)
+func Run(pkgPaths ...string) []string {
+	var messages []string
+	for _, v := range pkgPaths {
+		messages = append(messages, checkDir(v)...)
+	}
+	return messages
 }
 
 const linterName = "readonly"
@@ -53,49 +54,81 @@ var funcTypes map[token.Pos]*funcInfo // key: FuncDecl.Name.NamePos
 var moduleDir string
 var roPrefix = defaultPrefix
 
-func initTypes(pkgs []*packages.Package) {
-	allPackages = pkgs
-	funcTypes = make(map[token.Pos]*funcInfo)
-	moduleDir = pkgs[0].Module.Dir
-
-	for _, pkg := range pkgs {
-		for _, file := range pkg.Syntax {
-			for _, decl := range file.Decls {
-				if fd, ok := decl.(*ast.FuncDecl); ok {
-					object := pkg.TypesInfo.Defs[fd.Name].(*types.Func)
-					info := &funcInfo{decl: fd, fullName: object.FullName()}
-					info.calcDecl()
-					funcTypes[fd.Name.Pos()] = info
-				}
-			}
+func runAnalyzer(pass *analysis.Pass) (interface{}, error) {
+	inspector := pass.ResultOf[inspect.Analyzer].(*inspector.Inspector)
+	inspector.Preorder([]ast.Node{(*ast.FuncDecl)(nil)}, func(n ast.Node) {
+		funcDecl := n.(*ast.FuncDecl)
+		for _, stmt := range funcDecl.Body.List {
+			checkStmt(pass, stmt)
 		}
-	}
-
-	for i := 0; i < 100; i++ {
-		changed := false
-		for _, info := range funcTypes {
-			old := info.roMask
-			info.calcBody()
-			if old != info.roMask {
-				changed = true
-			}
-		}
-		if !changed {
-			return
-		}
-	}
+	})
+	return nil, nil
 }
 
-func runAnalyzer(pass *analysis.Pass) (interface{}, error) {
-	for _, f := range pass.Files {
-		ast.Inspect(f, func(n ast.Node) bool {
-			if decl, ok := n.(*ast.FuncDecl); ok {
-				for _, stmt := range decl.Body.List {
-					checkStmt(pass, stmt)
+func checkDir(root string) []string {
+	// 配置解析选项
+	cfg := &packages.Config{
+		Mode:  packages.NeedName | packages.NeedSyntax | packages.NeedTypesInfo | packages.NeedModule,
+		Dir:   root,  // 指定项目目录
+		Tests: false, // 不包含测试文件
+	}
+
+	// 加载所有 package
+	pkgs, err := packages.Load(cfg, "./...")
+	if err != nil {
+		panic(fmt.Sprintf("loading packages fail, err: %v", err))
+	}
+	inspectors := initTypes(pkgs)
+
+	analyzer := &analysis.Analyzer{
+		Name: linterName,
+		Doc:  "check variable with 'ro' start", // 文档说明
+		Run:  runAnalyzer,                      // 执行分析的函数
+	}
+
+	// 遍历加载的包并执行分析
+	var messages []string
+	var mu sync.Mutex
+	var wg sync.WaitGroup
+	wg.Add(len(pkgs))
+	for i, pkg := range pkgs {
+		go func() {
+			defer func() {
+				wg.Done()
+				if err := recover(); err != nil {
+					mu.Lock()
+					messages = append(messages, fmt.Sprintf("%s: pkg check fail, panic: %v", pkg.PkgPath, err))
+					mu.Unlock()
+				}
+			}()
+			var diag []analysis.Diagnostic
+			pass := &analysis.Pass{
+				Analyzer:  analyzer, // 需要定义你的分析器
+				Fset:      pkg.Fset,
+				Files:     pkg.Syntax,
+				TypesInfo: pkg.TypesInfo,
+				Pkg:       pkg.Types,
+				Report: func(diagnostic analysis.Diagnostic) {
+					diag = append(diag, diagnostic)
+				}, // 需要定义一个报告函数
+				TypesSizes: pkg.TypesSizes,
+				ResultOf:   map[*analysis.Analyzer]interface{}{inspect.Analyzer: inspectors[i]},
+				// 你可以根据需要设置其他字段
+			}
+
+			_, _ = analyzer.Run(pass)
+
+			for _, v := range diag {
+				pos := getPosition(pkg.Fset, v.Pos)
+				msg := fmt.Sprintf("%v: %s", pos, v.Message)
+				if slices.Index(messages, msg) == -1 {
+					mu.Lock()
+					messages = append(messages, msg)
+					mu.Unlock()
 				}
 			}
-			return true
-		})
+		}()
 	}
-	return nil, nil
+	wg.Wait()
+	return messages
 }
