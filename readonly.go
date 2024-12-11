@@ -89,17 +89,18 @@ func checkDir(root string) []string {
 	// 遍历加载的包并执行分析
 	var messages []string
 	var mu sync.Mutex
-	var wg sync.WaitGroup
-	wg.Add(len(pkgs))
+	queueLen := 20
+	queue := make(chan struct{}, queueLen)
 	for i, pkg := range pkgs {
+		queue <- struct{}{}
 		go func() {
 			defer func() {
-				wg.Done()
 				if err := recover(); err != nil {
 					mu.Lock()
 					messages = append(messages, fmt.Sprintf("%s: pkg check fail, panic: %v", pkg.PkgPath, err))
 					mu.Unlock()
 				}
+				<-queue
 			}()
 			var diag []analysis.Diagnostic
 			pass := &analysis.Pass{
@@ -129,6 +130,9 @@ func checkDir(root string) []string {
 			}
 		}()
 	}
-	wg.Wait()
+
+	for i := 0; i < queueLen; i++ {
+		queue <- struct{}{}
+	}
 	return messages
 }
