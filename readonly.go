@@ -8,6 +8,7 @@ import (
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
 	"golang.org/x/tools/go/packages"
+	"runtime"
 	"slices"
 	"sync"
 )
@@ -89,7 +90,7 @@ func checkDir(root string) []string {
 	// 遍历加载的包并执行分析
 	var messages []string
 	var mu sync.Mutex
-	queueLen := 20
+	queueLen := runtime.GOMAXPROCS(0) * 2
 	queue := make(chan struct{}, queueLen)
 	for i, pkg := range pkgs {
 		queue <- struct{}{}
