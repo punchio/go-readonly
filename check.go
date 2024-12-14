@@ -2,6 +2,7 @@ package readonly
 
 import (
 	"bytes"
+	"fmt"
 	"go/ast"
 	"go/printer"
 	"go/token"
@@ -15,19 +16,61 @@ import (
 func initTypes(pkgs []*packages.Package) []*inspector.Inspector {
 	allPackages = pkgs
 	funcTypes = make(map[token.Pos]*funcInfo)
+	receiverTypes = make(map[types.Type][]*funcInfo)
 	moduleDir = pkgs[0].Module.Dir
 
 	var inspectors []*inspector.Inspector
 	for _, pkg := range pkgs {
 		i := inspector.New(pkg.Syntax)
 		inspectors = append(inspectors, i)
+		ifaces := make(map[*types.Interface]map[string]uint64)
+		i.Preorder([]ast.Node{&ast.InterfaceType{}}, func(node ast.Node) {
+			it := node.(*ast.InterfaceType)
+			t, ok := pkg.TypesInfo.Types[it]
+			if !ok {
+				return
+			}
+			ti := t.Type.Underlying().(*types.Interface)
+			ifaces[ti] = make(map[string]uint64)
+			for _, v := range it.Methods.List {
+				ft, ok := v.Type.(*ast.FuncType)
+				if !ok {
+					return
+				}
+				mask := checkFuncType(ft)
+				ifaces[ti][v.Names[0].Name] = mask
+			}
+		})
+
 		i.Preorder([]ast.Node{&ast.FuncDecl{}}, func(n ast.Node) {
 			fd := n.(*ast.FuncDecl)
 			object := pkg.TypesInfo.Defs[fd.Name].(*types.Func)
 			info := &funcInfo{decl: fd, fullName: object.FullName()}
 			info.calcDecl()
 			funcTypes[fd.Name.Pos()] = info
+
+			if fd.Recv != nil {
+				tmp := pkg.TypesInfo.Types[fd.Recv.List[0].Type]
+				receiverTypes[tmp.Type.Underlying()] = append(receiverTypes[tmp.Type.Underlying()], info)
+			}
 		})
+
+		for t, infos := range receiverTypes {
+			for ti, mask := range ifaces {
+				if types.Implements(t, ti) {
+					for _, info := range infos {
+						iMask, ok := mask[info.decl.Name.Name]
+						if !ok || info.roMask != iMask {
+							fmt.Println(t.Underlying().String(), " not match ", ti.Underlying().String())
+						}
+					}
+				}
+			}
+		}
+
+		//for _, syntax := range pkg.Syntax {
+		//	_ = ast.Print(pkg.Fset, syntax)
+		//}
 	}
 
 	for i := 0; i < 100; i++ {

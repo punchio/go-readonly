@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"go/ast"
 	"go/token"
+	"go/types"
 	"golang.org/x/tools/go/analysis"
 	"golang.org/x/tools/go/analysis/passes/inspect"
 	"golang.org/x/tools/go/ast/inspector"
@@ -52,6 +53,7 @@ const docCN = `
 
 var allPackages []*packages.Package
 var funcTypes map[token.Pos]*funcInfo // key: FuncDecl.Name.NamePos
+var receiverTypes map[types.Type][]*funcInfo
 var moduleDir string
 var roPrefix = defaultPrefix
 

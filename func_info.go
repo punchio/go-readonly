@@ -13,17 +13,21 @@ type funcInfo struct {
 
 // calcDecl 检查函数声明
 func (i *funcInfo) calcDecl() {
-	roMask := uint64(0)
-
 	decl := i.decl
 	funcType := decl.Type
+
+	roMask := checkFuncType(funcType)
 	// 检查接收器
 	if decl.Recv != nil && len(decl.Recv.List) > 0 &&
 		len(decl.Recv.List[0].Names) > 0 &&
 		checkName(decl.Recv.List[0].Names[0].Name) {
 		roMask = 1 << 63
 	}
+	i.roMask |= roMask
+}
 
+func checkFuncType(funcType *ast.FuncType) uint64 {
+	roMask := uint64(0)
 	// 检查参数
 	if funcType.Params != nil {
 		index := 0
@@ -49,8 +53,7 @@ func (i *funcInfo) calcDecl() {
 			}
 		}
 	}
-
-	i.roMask |= roMask
+	return roMask
 }
 
 // calcBody 检查函数体内返回语句
@@ -96,11 +99,19 @@ func (i *funcInfo) calcBody() {
 }
 
 func (i *funcInfo) getResultFlag() uint64 {
-	return (i.roMask & (uint64(math.MaxUint32) << 32)) >> 32
+	return getResultFlag(i.roMask)
+}
+
+func getResultFlag(mask uint64) uint64 {
+	return (mask & (uint64(math.MaxUint32) << 32)) >> 32
 }
 
 func (i *funcInfo) getParamFlag() uint64 {
-	return i.roMask & math.MaxUint32
+	return getParamFlag(i.roMask)
+}
+
+func getParamFlag(mask uint64) uint64 {
+	return mask & math.MaxUint32
 }
 
 func (i *funcInfo) getRecvFlag() uint64 {
